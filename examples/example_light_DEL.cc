@@ -1657,9 +1657,9 @@ void convergence_11routine() {
     test_par->grid_set.spatial_min_refine_lv = lv;
     test_par->grid_set.spectral_min_refine_lv = lv;
     std::cout << "refine lv. " << lv << std::endl;
-    for (int i = 10; i < 1000; i += 20) {
+    for (int i = 5; i < 200; i += 5) {
       test_par->pip_set.step_lim = i;
-      test_par->pip_set.physical_timediff = 2.1 / i;
+      test_par->pip_set.physical_timediff = 6. / i;
       test_par->pip_set.refine_cd = test_par->pip_set.step_lim + 1;
       auto test_prop_rg =
           std::make_unique<Propagator_tmp<1, 1>>(test_par.get());

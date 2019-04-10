@@ -1073,7 +1073,7 @@ void convergence_11routine() {
   for (int lv = 0; lv <= 4; ++lv) {
     test_par->grid_set.spatial_min_refine_lv = lv;
     std::cout << "refine lv. " << lv << std::endl;
-    for (int i = 10; i < 1000; i += 20) {
+    for (int i = 5; i < 300; i += 5) {
       test_par->pip_set.step_lim = i;
       test_par->pip_set.physical_timediff = 4.2 / i;
       test_par->pip_set.refine_cd = test_par->pip_set.step_lim + 1;
