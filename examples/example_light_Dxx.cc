@@ -931,8 +931,7 @@ void convergence_11routine() {
     std::cout << "refine lv. " << lv << std::endl;
     for (int i = 10; i < 1000; i += 20) {
       test_par->pip_set.step_lim = i;
-      test_par->pip_set.physical_timediff =
-          21. / i; // total evolving time is 21
+      test_par->pip_set.physical_timediff = 21. / i;
       test_par->pip_set.refine_cd = test_par->pip_set.step_lim + 1;
       auto test_prop_rg =
           std::make_unique<Propagator_tmp<1, 1>>(test_par.get());

@@ -6,7 +6,7 @@ OPTION(ON_DOCKER "Build on docker image" OFF)
 OPTION(ENABLE_DEBUGGING "Enable debugging" ON)
 OPTION(ENABLE_EXAMPLE "Enable examples" ON)
 OPTION(ENABLE_OPENMP "Enable OPENMP threading" ON)
-OPTION(ENABLE_TIMING "Enable timing" ON)
+OPTION(ENABLE_TIMING "Enable timing" OFF)
 OPTION(ENABLE_REPORT "Enable verbose report" OFF)
 #-------------- instruction ------------------#
 
