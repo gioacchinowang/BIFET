@@ -1665,7 +1665,7 @@ void convergence_11routine() {
           std::make_unique<Propagator_tmp<1, 1>>(test_par.get());
       test_prop_rg->run();
       std::cout << i << "\t" << test_prop_rg->spatial_L2err() << std::endl;
-      std::cout << i << "\t" << test_prop_rg->spatial_L2err() << std::endl;
+      std::cout << i << "\t" << test_prop_rg->spectral_L2err() << std::endl;
     }
   }
 }

@@ -3,7 +3,7 @@
 **BI**-domain **F**inite **E**lement **T**oolkit
 
 BIFET is a [**deal.ii**](https://www.dealii.org/) based interface
-for solving PDEs living in high-dimension (by high-dimension we mean dimension larger than three.} space.
+for solving PDEs living in high-dimension (by high-dimension we mean dimension larger than three) space.
 Finite element triangulation of a domain with dimension larger than three is not feasible, which is a technical bottleneck for high-dimension problems.
 Particularly, physicists prefer phase-space description for analyzing systems with micro processes portrayed by macro properties, e.g., fluid dynamics.
 In order to free scientists from the trade-off between simulation precision and programming complexity, a general framework which enables users to describe and solve high-dimension problem is required.

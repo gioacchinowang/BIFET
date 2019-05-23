@@ -1,38 +1,38 @@
-// examples of spectral advection (energy loss) problem which is
-// - defined in different dimensions
-// - solved in time-dependent and time-independent approach
-//
-// the example problem is defined simple enough to have analytical solution
-// for testing numeric precision
+// in this example we solve a simple CR electron transport scenario with
+// spatial diffusion + energy loss in R^{1+1} dimension setting
+// both spatial and spectral domains are treated as reduced from 3D spherical
+// symmetric domain this assumption brings in extra geometric tensors in System
+// assembling although derived temporary classes are built with dimension
+// templates the math within works only for spherical symmetric domain reduced
+// in 1D both spatial diffusion and energy loss tensors are energy dependent
+// spatial frame is bounded by zero value on all surfaces
+// spectral frame is bounded by zero on upper boundary surfaces (the upper
+// energy limit) the system is built with implicit convention for physical
+// quantities
+// - energy in GeV
+// - spatial position/distance in kpc
+// - time in Gyr
 
 #include <cassert>
 #include <cmath>
 #include <memory>
+#include <utility>
 #include <vector>
-#ifdef _OPENMP
-#include <omp.h>
+#ifndef NTIMING
+#include <timer.h>
 #endif
 
-#include <deal.II/base/geometry_info.h>
 #include <deal.II/base/point.h>
-#include <deal.II/base/quadrature.h>
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/table_indices.h>
 #include <deal.II/base/tensor.h>
-#include <deal.II/dofs/dof_handler.h>
+#include <deal.II/fe/fe_q.h>
 #include <deal.II/fe/fe_values.h>
-#include <deal.II/grid/grid_tools.h>
 #include <deal.II/lac/dynamic_sparsity_pattern.h>
 #include <deal.II/lac/full_matrix.h>
+#include <deal.II/lac/sparse_matrix.h>
 #include <deal.II/lac/sparsity_pattern.h>
 #include <deal.II/lac/vector.h>
-#include <deal.II/numerics/fe_field_function.h>
-#include <deal.II/numerics/vector_tools.h>
-
-#include <deal.II/lac/precondition.h>
-#include <deal.II/lac/solver_bicgstab.h>
-#include <deal.II/lac/solver_control.h>
-#include <deal.II/lac/sparse_direct.h>
 
 #include <advection.h>
 #include <diffusion.h>
@@ -40,168 +40,289 @@
 #include <param.h>
 #include <propagator.h>
 #include <simbox.h>
-#include <solution.h>
 #include <source.h>
 #include <system.h>
 
 //------------------------------------------------------------------------------
-// customized advection tensor
+//customized diffusion
+
+template <int spa_dim, int spe_dim>
+class Diffusion_tmp final : public Diffusion<spa_dim, spe_dim> {
+public:
+  Diffusion_tmp() = default;
+  virtual ~Diffusion_tmp() = default;
+  Diffusion_tmp(const Diffusion_tmp &d) : Diffusion<spa_dim, spe_dim>(d) {}
+  virtual Diffusion_tmp *clone() const { return new Diffusion_tmp(*this); }
+  dealii::Tensor<2, spa_dim, double>
+  Dxx(const dealii::Point<spa_dim, double> &,
+      const dealii::Point<spe_dim, double> &) const override;
+};
+
+// isotropic spatial diffusion with power law energy dependency
+template <int spa_dim, int spe_dim>
+dealii::Tensor<2, spa_dim, double> Diffusion_tmp<spa_dim, spe_dim>::Dxx(
+    const dealii::Point<spa_dim, double> &x,
+    const dealii::Point<spe_dim, double> &q) const {
+  dealii::Tensor<2, spa_dim, double> tmp;
+  tmp = 0;
+  double Esph{std::exp(q[0])};
+  double Xsph2{x[0] * x[0]};
+  // x^2 for spherical symmetric
+  const double iso_dxx = 63.0 * std::pow(Esph, 0.33) * Xsph2;
+  for (unsigned int i = 0; i < spa_dim; ++i)
+    tmp[dealii::TableIndices<2>(i, i)] = iso_dxx;
+  return tmp;
+}
+
+//------------------------------------------------------------------------------
+//customized advection
 
 template <int spa_dim, int spe_dim>
 class Advection_tmp final : public Advection<spa_dim, spe_dim> {
 public:
-  Advection_tmp(const Param *);
+  Advection_tmp() = default;
   virtual ~Advection_tmp() = default;
-  Advection_tmp(const Advection_tmp &a) : Advection<spa_dim, spe_dim>(a) {
-    this->alpha = a.alpha;
-    this->beta = a.beta;
-    this->eta = a.eta;
-    this->nz = a.nz;
-    this->nx = a.nx;
-    this->ny = a.ny;
-    this->sz = a.sz;
-    this->sx = a.sx;
-    this->sy = a.sy;
-    this->L0 = a.L0;
-    this->L1 = a.L1;
-    this->L2 = a.L2;
-    this->q0_min = a.q0_min;
-    this->q1_min = a.q1_min;
-    this->q2_min = a.q2_min;
-  }
+  Advection_tmp(const Advection_tmp &a) : Advection<spa_dim, spe_dim>(a) {}
   virtual Advection_tmp *clone() const { return new Advection_tmp(*this); }
   dealii::Tensor<1, spe_dim, double>
   Aqq(const dealii::Point<spa_dim, double> &,
       const dealii::Point<spe_dim, double> &) const override;
 
-  double alpha, beta, eta, nz, nx, ny, sz, sx, sy;
-  double L0, L1, L2, q0_min, q1_min, q2_min;
+protected:
+  dealii::Tensor<1, spe_dim, double>
+  ic_loss(const dealii::Point<spa_dim, double> &,
+          const dealii::Point<spe_dim, double> &) const;
+  dealii::Tensor<1, spe_dim, double>
+  sync_loss(const dealii::Point<spa_dim, double> &,
+            const dealii::Point<spe_dim, double> &) const;
+  dealii::Tensor<1, spe_dim, double>
+  coul_loss(const dealii::Point<spa_dim, double> &,
+            const dealii::Point<spe_dim, double> &) const;
+  dealii::Tensor<1, spe_dim, double>
+  brem_loss(const dealii::Point<spa_dim, double> &,
+            const dealii::Point<spe_dim, double> &) const;
 };
 
 template <int spa_dim, int spe_dim>
-Advection_tmp<spa_dim, spe_dim>::Advection_tmp(const Param *par) {
-  this->alpha = -1.;
-  this->beta = -1.;
-  this->eta = -1.;
-  this->nz = -1.5;
-  this->nx = -1.5;
-  this->ny = -1.5;
-  this->sz = -2.2;
-  this->sx = -2.2;
-  this->sy = -2.2;
-  this->q0_min = par->grid_set.q1_min;
-  this->q1_min = par->grid_set.q2_min;
-  this->q2_min = par->grid_set.q3_min;
+dealii::Tensor<1, spe_dim, double> Advection_tmp<spa_dim, spe_dim>::Aqq(
+    const dealii::Point<spa_dim, double> &x,
+    const dealii::Point<spe_dim, double> &q) const {
+  dealii::Tensor<1, spe_dim, double> tmp;
+  tmp = 0;
+  double Esph2{std::exp(q[0]) * std::exp(q[0])};
+  tmp += this->ic_loss(x, q);
+  tmp += this->sync_loss(x, q);
+  tmp += this->coul_loss(x, q);
+  tmp += this->brem_loss(x, q);
+  // -1. as loss
+  return -Esph2 * tmp;
 }
 
-// customized advection modelling
 template <int spa_dim, int spe_dim>
-dealii::Tensor<1, spe_dim, double> Advection_tmp<spa_dim, spe_dim>::Aqq(
+dealii::Tensor<1, spe_dim, double> Advection_tmp<spa_dim, spe_dim>::ic_loss(
     const dealii::Point<spa_dim, double> &,
     const dealii::Point<spe_dim, double> &q) const {
   dealii::Tensor<1, spe_dim, double> tmp;
   tmp = 0;
-  // E[0]
-  tmp[dealii::TableIndices<1>(0)] =
-      this->alpha * std::exp(this->nz * (q[0] - this->q0_min));
-  if (spe_dim > 1) {
-    // E[1]
-    tmp[dealii::TableIndices<1>(1)] =
-        this->beta * std::exp(this->nx * (q[1] - this->q1_min));
-    // E[2]
-    tmp[dealii::TableIndices<1>(2)] =
-        this->eta * std::exp(this->ny * (q[2] - this->q2_min));
-  }
+  double Esph{std::exp(q[0])};
+  const double iso_aqq = 0.83 * Esph * Esph;
+  for (unsigned int i = 0; i < spe_dim; ++i)
+    tmp[dealii::TableIndices<1>(i)] = iso_aqq;
+  return tmp;
+}
+
+template <int spa_dim, int spe_dim>
+dealii::Tensor<1, spe_dim, double> Advection_tmp<spa_dim, spe_dim>::sync_loss(
+    const dealii::Point<spa_dim, double> &,
+    const dealii::Point<spe_dim, double> &q) const {
+  dealii::Tensor<1, spe_dim, double> tmp;
+  tmp = 0;
+  double Esph{std::exp(q[0])};
+  const double iso_aqq = 1.99 * Esph * Esph;
+  for (unsigned int i = 0; i < spe_dim; ++i)
+    tmp[dealii::TableIndices<1>(i)] = iso_aqq;
+  return tmp;
+}
+
+template <int spa_dim, int spe_dim>
+dealii::Tensor<1, spe_dim, double> Advection_tmp<spa_dim, spe_dim>::coul_loss(
+    const dealii::Point<spa_dim, double> &,
+    const dealii::Point<spe_dim, double> &q) const {
+  dealii::Tensor<1, spe_dim, double> tmp;
+  tmp = 0;
+  double Esph{std::exp(q[0])};
+  const double iso_aqq = 14.18 + 0.96 * std::log(Esph);
+  for (unsigned int i = 0; i < spe_dim; ++i)
+    tmp[dealii::TableIndices<1>(i)] = iso_aqq;
+  return tmp;
+}
+
+template <int spa_dim, int spe_dim>
+dealii::Tensor<1, spe_dim, double> Advection_tmp<spa_dim, spe_dim>::brem_loss(
+    const dealii::Point<spa_dim, double> &,
+    const dealii::Point<spe_dim, double> &q) const {
+  dealii::Tensor<1, spe_dim, double> tmp;
+  tmp = 0;
+  double Esph{std::exp(q[0])};
+  const double iso_aqq = 40.0 * Esph;
+  for (unsigned int i = 0; i < spe_dim; ++i)
+    tmp[dealii::TableIndices<1>(i)] = iso_aqq;
   return tmp;
 }
 
 //------------------------------------------------------------------------------
-// customized source
+//customized source
 
 template <int spa_dim, int spe_dim>
 class Source_tmp final : public Source<spa_dim, spe_dim> {
 public:
-  Source_tmp(const Param *);
+  Source_tmp() = default;
   virtual ~Source_tmp() = default;
-  Source_tmp(const Source_tmp &s) : Source<spa_dim, spe_dim>(s) {
-    this->alpha = s.alpha;
-    this->beta = s.beta;
-    this->eta = s.eta;
-    this->nz = s.nz;
-    this->nx = s.nx;
-    this->ny = s.ny;
-    this->sz = s.sz;
-    this->sx = s.sx;
-    this->sy = s.sy;
-    this->L0 = s.L0;
-    this->L1 = s.L1;
-    this->L2 = s.L2;
-    this->q0_min = s.q0_min;
-    this->q1_min = s.q1_min;
-    this->q2_min = s.q2_min;
-  }
+  Source_tmp(const Source_tmp &s) : Source<spa_dim, spe_dim>(s) {}
   virtual Source_tmp *clone() const { return new Source_tmp(*this); }
   double value(const dealii::Point<spa_dim, double> &,
                const dealii::Point<spe_dim, double> &) const override;
-
-  double alpha, beta, eta, nz, nx, ny, sz, sx, sy;
-  double L0, L1, L2, q0_min, q1_min, q2_min;
 };
 
 template <int spa_dim, int spe_dim>
-Source_tmp<spa_dim, spe_dim>::Source_tmp(const Param *par) {
-  this->alpha = -1.;
-  this->beta = -1.;
-  this->eta = -1.;
-  this->nz = -1.5;
-  this->nx = -1.5;
-  this->ny = -1.5;
-  this->sz = -2.2;
-  this->sx = -2.2;
-  this->sy = -2.2;
-  this->q0_min = par->grid_set.q1_min;
-  this->q1_min = par->grid_set.q2_min;
-  this->q2_min = par->grid_set.q3_min;
-  this->L0 = par->grid_set.q1_max - this->q0_min;
-  this->L1 = par->grid_set.q2_max - this->q1_min;
-  this->L2 = par->grid_set.q3_max - this->q2_min;
-}
-
-// customized source modelling
-template <int spa_dim, int spe_dim>
 double Source_tmp<spa_dim, spe_dim>::value(
-    const dealii::Point<spa_dim, double> &,
+    const dealii::Point<spa_dim, double> &x,
     const dealii::Point<spe_dim, double> &q) const {
-  const double prefact0{std::exp(this->q0_min) /
-                        (this->alpha * (1 + this->sz))};
-  const double dz{q[0] - this->q0_min};
-  const double u0{prefact0 *
-                  (std::exp((1 + this->sz - this->nz) * dz) -
-                   std::exp((1 + this->sz) * this->L0 - this->nz * dz))};
-  const double f0{std::exp(this->sz * dz)};
-  double tmp = f0;
-  if (spe_dim > 1) {
-    const double prefact1{std::exp(this->q1_min) /
-                          (this->beta * (1 + this->sx))};
-    const double prefact2{std::exp(this->q2_min) /
-                          (this->eta * (1 + this->sy))};
-    const double dx{q[1] - this->q1_min};
-    const double dy{q[2] - this->q2_min};
-    const double f1{std::exp(this->sx * dx)};
-    const double f2{std::exp(this->sy * dy)};
-    const double u1{prefact1 *
-                    (std::exp((1 + this->sx - this->nx) * dx) -
-                     std::exp((1 + this->sx) * this->L1 - this->nx * dx))};
-    const double u2{prefact2 *
-                    (std::exp((1 + this->sy - this->ny) * dy) -
-                     std::exp((1 + this->sy) * this->L2 - this->ny * dy))};
-    tmp = tmp * u1 * u2 + u0 * f1 * u2 + u0 * u1 * f2;
-  }
-  return tmp;
+  double Esph{std::exp(q[0])};
+
+  // SNR source
+  return 0.39 * std::exp(-x[0] / 0.5) * std::pow(Esph, -2.2);
+
+  // Burkert source
+  // return std::pow(Esph,-2.2)*0.0156/std::pow((x[0]+0.5)*(x[0]*x[0]+0.25),2);
+
+  // NFW source
+  // if (x[0]<0.01)
+  //    return std::pow(Esph,-2.2)/std::pow(0.01*1.01*1.01,2);
+  // else
+  //    return std::pow(Esph,-2.2)/std::pow(x[0]*(1.+x[0])*(1.+x[0]),2);
 }
 
 //------------------------------------------------------------------------------
-// customized Simbox
+//customized frame
+
+template <int dim> class Frame__tmp final : public Frame<dim> {
+public:
+  Frame__tmp() = default;
+  Frame__tmp(const Param *);
+  virtual ~Frame__tmp() = default;
+  void bfmap_init() override;
+};
+
+template <int dim> Frame__tmp<dim>::Frame__tmp(const Param *par) {
+  this->pol_order = par->pip_set.spatial_pol_order;
+  this->min_refine_lv = par->grid_set.spatial_min_refine_lv;
+  this->max_refine_lv = par->grid_set.spatial_max_refine_lv;
+  this->refine_ratio = par->grid_set.refine_ratio;
+  this->coarsen_ratio = par->grid_set.coarsen_ratio;
+  switch (dim) {
+  case 1:
+    this->pivot_min = dealii::Point<dim, double>(par->grid_set.x1_min);
+    this->pivot_max = dealii::Point<dim, double>(par->grid_set.x1_max);
+    this->block_nums = {par->grid_set.nx1 - 1};
+    break;
+  case 2:
+    this->pivot_min =
+        dealii::Point<dim, double>(par->grid_set.x1_min, par->grid_set.x2_min);
+    this->pivot_max =
+        dealii::Point<dim, double>(par->grid_set.x1_max, par->grid_set.x2_max);
+    this->block_nums = {par->grid_set.nx1 - 1, par->grid_set.nx2 - 1};
+    break;
+  case 3:
+    this->pivot_min = dealii::Point<dim, double>(
+        par->grid_set.x1_min, par->grid_set.x2_min, par->grid_set.x3_min);
+    this->pivot_max = dealii::Point<dim, double>(
+        par->grid_set.x1_max, par->grid_set.x2_max, par->grid_set.x3_max);
+    this->block_nums = {par->grid_set.nx1 - 1, par->grid_set.nx2 - 1,
+                        par->grid_set.nx3 - 1};
+    break;
+  default:
+    assert(dim > 0 and dim < 4);
+    break;
+  }
+  this->fe = std::make_unique<dealii::FE_Q<dim>>(this->pol_order);
+}
+
+template <int dim> void Frame__tmp<dim>::bfmap_init() {
+  this->bfmap->clear();
+  auto bid = this->triangulation->get_boundary_ids();
+  for (auto &i : bid) {
+    if (i % 2 != 0)
+      this->bfmap->insert(std::make_pair(i, this->boundary.get()));
+  }
+}
+
+//------------------------------------------------------------------------------
+//customised solution
+
+template <int spa_dim, int spe_dim>
+class Solution_tmp final : public Solution<spa_dim, spe_dim> {
+public:
+  Solution_tmp(const Param *);
+  virtual ~Solution_tmp() = default;
+  Solution_tmp(const Solution_tmp &s) : Solution<spa_dim, spe_dim>(s) {}
+  virtual Solution_tmp *clone() const { return new Solution_tmp(*this); }
+  class Spatial_initial : public Solution<spa_dim, spe_dim>::Spatial_initial {
+  public:
+    using dealii::Function<1, double>::operator=;
+    Spatial_initial() = default;
+    Spatial_initial(const Spatial_initial &s)
+        : Solution<spa_dim, spe_dim>::Spatial_initial(s) {
+      *this = s;
+    }
+    virtual Spatial_initial *clone() const {
+      return new Spatial_initial(*this);
+    }
+    virtual ~Spatial_initial() = default;
+    double value(const dealii::Point<spa_dim, double> &,
+                 const unsigned int component = 0) const override;
+  };
+  class Spectral_initial : public Solution<spa_dim, spe_dim>::Spectral_initial {
+  public:
+    using dealii::Function<1, double>::operator=;
+    Spectral_initial() = default;
+    Spectral_initial(const Spectral_initial &s)
+        : Solution<spa_dim, spe_dim>::Spectral_initial(s) {
+      *this = s;
+    }
+    virtual Spectral_initial *clone() const {
+      return new Spectral_initial(*this);
+    }
+    virtual ~Spectral_initial() = default;
+    double value(const dealii::Point<spe_dim, double> &,
+                 const unsigned int component = 0) const override;
+  };
+};
+
+template <int spa_dim, int spe_dim>
+Solution_tmp<spa_dim, spe_dim>::Solution_tmp(const Param *) {
+  this->Snew = std::make_unique<dealii::Vector<double>>();
+  this->Sold = std::make_unique<dealii::Vector<double>>();
+  this->spatial = std::make_unique<
+      typename Solution_tmp<spa_dim, spe_dim>::Spatial_initial>();
+  this->spectral = std::make_unique<
+      typename Solution_tmp<spa_dim, spe_dim>::Spectral_initial>();
+}
+
+template <int spa_dim, int spe_dim>
+double Solution_tmp<spa_dim, spe_dim>::Spatial_initial::value(
+    const dealii::Point<spa_dim, double> &, const unsigned int) const {
+  return 0.;
+}
+
+template <int spa_dim, int spe_dim>
+double Solution_tmp<spa_dim, spe_dim>::Spectral_initial::value(
+    const dealii::Point<spe_dim, double> &, const unsigned int) const {
+  return 0.;
+}
+
+//------------------------------------------------------------------------------
+//customized simbox
 
 template <int spa_dim, int spe_dim>
 class Simbox_tmp final : public Simbox<spa_dim, spe_dim> {
@@ -213,45 +334,40 @@ public:
 
 template <int spa_dim, int spe_dim>
 Simbox_tmp<spa_dim, spe_dim>::Simbox_tmp(const Param *par) {
-  this->spatial_frame = std::make_unique<Frame_freespatial<spa_dim>>(par);
+  this->spatial_frame = std::make_unique<Frame__tmp<spa_dim>>(par);
   this->spectral_frame = std::make_unique<dGFrame_spectral<spe_dim>>(par);
   this->sparsity = std::make_unique<dealii::SparsityPattern>();
   this->dsp = std::make_unique<dealii::DynamicSparsityPattern>();
 }
 
 //------------------------------------------------------------------------------
-// customized System
+//customized system
 
-// spectral advection (energy loss) System uses discontinuous Dalerkin method
-// for spectral frame which involves surface integration on both internal and
-// external surface elements fitine-element discontinuous Galerkin can be
-// considered as a hybrid of fintie-element and finite-volume
 template <int spa_dim, int spe_dim>
 class System_tmp final : public System<spa_dim, spe_dim> {
 public:
-  System_tmp() = default;
-  System_tmp(const Param *);
+  System_tmp();
   virtual ~System_tmp() = default;
-  // copy ctor
   System_tmp(const System_tmp<spa_dim, spe_dim> &s)
       : System<spa_dim, spe_dim>(s) {}
-  // virtual copy
   virtual System_tmp *clone() const { return new System_tmp(*this); }
-  // nested operator class
   class Operator : public System<spa_dim, spe_dim>::Operator {
   public:
     Operator() = default;
     virtual ~Operator() = default;
     virtual Operator *clone() const { return new Operator(*this); }
-    // configure Mxq
     void init(System<spa_dim, spe_dim> *, const Simbox<spa_dim, spe_dim> *,
-              const double &step_time = 0) override;
+              const double &) override;
 
   protected:
+    dealii::Tensor<2, spa_dim, double>
+    Tx(const dealii::Point<spa_dim, double> &) const;
+    dealii::Tensor<1, spa_dim, double>
+    dTx(const dealii::Point<spa_dim, double> &) const;
     dealii::Tensor<2, spe_dim, double>
-    T(const dealii::Point<spe_dim, double> &) const;
+    Tq(const dealii::Point<spe_dim, double> &) const;
     dealii::Tensor<1, spe_dim, double>
-    dT(const dealii::Point<spe_dim, double> &) const;
+    dTq(const dealii::Point<spe_dim, double> &) const;
     // assemble face terms for init function
     void assemble_spectral_face(
         System<spa_dim, spe_dim> *, const Simbox<spa_dim, spe_dim> *,
@@ -263,63 +379,68 @@ public:
         dealii::FullMatrix<double> *, dealii::FullMatrix<double> *,
         dealii::FullMatrix<double> *, dealii::FullMatrix<double> *);
   };
-  // nested rhs class
   class RHS : public System<spa_dim, spe_dim>::RHS {
   public:
     RHS() = default;
     virtual ~RHS() = default;
     virtual RHS *clone() const { return new RHS(*this); }
-    // initialize/fill system_rhs with value info
     void init(System<spa_dim, spe_dim> *, const Simbox<spa_dim, spe_dim> *,
-              const double &step_time = 0) override;
+              const double &) override;
   };
 };
 
-template <int spa_dim, int spe_dim>
-System_tmp<spa_dim, spe_dim>::System_tmp(const Param *par) {
-  // allocate sparse matrix
+template <int spa_dim, int spe_dim> System_tmp<spa_dim, spe_dim>::System_tmp() {
   this->Mx = std::make_unique<dealii::SparseMatrix<double>>();
   this->Mq = std::make_unique<dealii::SparseMatrix<double>>();
   this->Mxq = std::make_unique<dealii::SparseMatrix<double>>();
-  // allocate vector
   this->Rxq = std::make_unique<dealii::Vector<double>>();
   this->Rx = std::make_unique<dealii::Vector<double>>();
   this->Rq = std::make_unique<dealii::Vector<double>>();
-  // rebind Operator and RHS holder
   this->op =
       std::make_unique<typename System_tmp<spa_dim, spe_dim>::Operator>();
   this->rhs = std::make_unique<typename System_tmp<spa_dim, spe_dim>::RHS>();
-  // physics
-  this->diffusion = std::make_unique<Diffusion<spa_dim, spe_dim>>();
-  this->advection = std::make_unique<Advection_tmp<spa_dim, spe_dim>>(par);
-  this->source = std::make_unique<Source_tmp<spa_dim, spe_dim>>(par);
+  this->diffusion = std::make_unique<Diffusion_tmp<spa_dim, spe_dim>>();
+  this->advection = std::make_unique<Advection_tmp<spa_dim, spe_dim>>();
+  this->source = std::make_unique<Source_tmp<spa_dim, spe_dim>>();
 }
 
-// geometric tensor
 template <int spa_dim, int spe_dim>
-dealii::Tensor<2, spe_dim, double> System_tmp<spa_dim, spe_dim>::Operator::T(
-    const dealii::Point<spe_dim, double> &q) const {
-  dealii::Tensor<2, spe_dim, double> tmp;
+dealii::Tensor<2, spa_dim, double> System_tmp<spa_dim, spe_dim>::Operator::Tx(
+    const dealii::Point<spa_dim, double> &x) const {
+  dealii::Tensor<2, spa_dim, double> tmp;
   tmp = 0;
-  tmp[dealii::TableIndices<2>(0, 0)] = std::exp(-q[0]);
-  if (spe_dim > 1) {
-    tmp[dealii::TableIndices<2>(1, 1)] = std::exp(-q[1]);
-    tmp[dealii::TableIndices<2>(2, 2)] = std::exp(-q[2]);
-  }
+  if (x[0] == 0)
+    return tmp; // avoid singularity
+  tmp[dealii::TableIndices<2>(0, 0)] = 1. / (x[0] * x[0]);
   return tmp;
 }
 
-// differentiated geometric tensor
 template <int spa_dim, int spe_dim>
-dealii::Tensor<1, spe_dim, double> System_tmp<spa_dim, spe_dim>::Operator::dT(
+dealii::Tensor<1, spa_dim, double> System_tmp<spa_dim, spe_dim>::Operator::dTx(
+    const dealii::Point<spa_dim, double> &x) const {
+  dealii::Tensor<1, spa_dim, double> tmp;
+  tmp = 0;
+  if (x[0] == 0)
+    return tmp; // avoid singularity
+  tmp[dealii::TableIndices<1>(0)] = -2. / (x[0] * x[0] * x[0]);
+  return tmp;
+}
+
+template <int spa_dim, int spe_dim>
+dealii::Tensor<2, spe_dim, double> System_tmp<spa_dim, spe_dim>::Operator::Tq(
+    const dealii::Point<spe_dim, double> &q) const {
+  dealii::Tensor<2, spe_dim, double> tmp;
+  tmp = 0;
+  tmp[dealii::TableIndices<2>(0, 0)] = std::exp(-3. * q[0]);
+  return tmp;
+}
+
+template <int spa_dim, int spe_dim>
+dealii::Tensor<1, spe_dim, double> System_tmp<spa_dim, spe_dim>::Operator::dTq(
     const dealii::Point<spe_dim, double> &q) const {
   dealii::Tensor<1, spe_dim, double> tmp;
   tmp = 0;
-  tmp[dealii::TableIndices<1>(0)] = -std::exp(-q[0]);
-  if (spe_dim > 1) {
-    tmp[dealii::TableIndices<1>(1)] = -std::exp(-q[1]);
-    tmp[dealii::TableIndices<1>(2)] = -std::exp(-q[2]);
-  }
+  tmp[dealii::TableIndices<1>(0)] = -3. * std::exp(-3. * q[0]);
   return tmp;
 }
 
@@ -336,13 +457,11 @@ void System_tmp<spa_dim, spe_dim>::Operator::init(
       std::make_unique<dealii::QGauss<spe_dim - 1>>(
           simbox->spectral_frame->fe->degree + 1);
   // fe_values in spatial domain
-  // update_gradients is critical
   auto spatial_fev = std::make_unique<dealii::FEValues<spa_dim>>(
       *(simbox->spatial_frame->fe), *spatial_quadrature_formula,
-      dealii::update_values | dealii::update_quadrature_points |
-          dealii::update_JxW_values);
+      dealii::update_values | dealii::update_gradients |
+          dealii::update_quadrature_points | dealii::update_JxW_values);
   // fe_values in spectral domain
-  // update_values is critical
   auto spectral_fev = std::make_unique<dealii::FEValues<spe_dim>>(
       *(simbox->spectral_frame->fe), *spectral_quadrature_formula,
       dealii::update_values | dealii::update_gradients |
@@ -380,7 +499,6 @@ void System_tmp<spa_dim, spe_dim>::Operator::init(
       std::make_unique<std::vector<dealii::types::global_dof_index>>(
           spectral_dpc);
   // allocate temporary local (per-cell) matrix holder
-  // allocate fullmatrices
   auto cell_Mx =
       std::make_unique<dealii::FullMatrix<double>>(spatial_dpc, spatial_dpc);
   auto cell_Mq_uivi =
@@ -406,7 +524,6 @@ void System_tmp<spa_dim, spe_dim>::Operator::init(
 #endif
   {
     spatial_fev->reinit(spatial_cell);
-    // (from per-cell indeces to global indeces)
 #ifndef NDEBUG
     assert(spatial_cell->active());
 #endif
@@ -423,12 +540,68 @@ void System_tmp<spa_dim, spe_dim>::Operator::init(
       }
 #endif
       spectral_fev->reinit(spectral_cell);
-      // (from per-cell indeces to global indeces)
 #ifndef NDEBUG
       assert(spectral_cell->active());
 #endif
       spectral_cell->get_dof_indices(*spectral_l2g);
-      // discrete integration over spectral domain per cell
+      // DIFFUSION OPERATOR
+      for (unsigned int spatial_qid = 0; spatial_qid < spatial_q_points;
+           ++spatial_qid) {
+        // discrete integration over spectral domain per cell
+        for (unsigned int spectral_qid = 0; spectral_qid < spectral_q_points;
+             ++spectral_qid) {
+          // prepare Mx (for diffusion)
+          for (dealii::types::global_dof_index i = 0; i < spatial_dpc; ++i) {
+            for (dealii::types::global_dof_index j = 0; j < spatial_dpc; ++j) {
+              const dealii::Tensor<2, spa_dim, double> diffusion_coefficient{
+                  system->diffusion->Dxx(
+                      spatial_fev->quadrature_point(spatial_qid),
+                      spectral_fev->quadrature_point(spectral_qid))};
+              const dealii::Tensor<2, spa_dim, double> geometric_coefficient{
+                  this->Tx(spatial_fev->quadrature_point(spatial_qid))};
+              const dealii::Tensor<1, spa_dim, double>
+                  geometric_div_coefficient{
+                      this->dTx(spatial_fev->quadrature_point(spatial_qid))};
+              cell_Mx->set(
+                  i, j,
+                  (dealii::scalar_product(
+                       geometric_coefficient *
+                           spatial_fev->shape_grad(i, spatial_qid),
+                       diffusion_coefficient *
+                           spatial_fev->shape_grad(j, spatial_qid)) +
+                   spatial_fev->shape_value(i, spatial_qid) *
+                       dealii::scalar_product(
+                           geometric_div_coefficient,
+                           diffusion_coefficient *
+                               spatial_fev->shape_grad(j, spatial_qid))) *
+                      spatial_fev->JxW(spatial_qid));
+            } // j
+          }   // i
+          // (convert local full matrix to global sparse matrix cacher)
+          system->Mx->reinit(*(simbox->spatial_frame->sparsity));
+          simbox->spatial_frame->constraints->distribute_local_to_global(
+              *cell_Mx, *spatial_l2g, *(system->Mx));
+          // prepare Mq (for diffusion)
+          for (dealii::types::global_dof_index alpha = 0; alpha < spectral_dpc;
+               ++alpha) {
+            for (dealii::types::global_dof_index beta = 0; beta < spectral_dpc;
+                 ++beta) {
+              cell_Mq_uivi->set(
+                  alpha, beta,
+                  spectral_fev->shape_value(alpha, spectral_qid) *
+                      spectral_fev->shape_value(beta, spectral_qid) *
+                      spectral_fev->JxW(spectral_qid));
+            } // beta
+          }   // alpha
+          // (convert local full matrix to global sparse matrix cacher)
+          system->Mq->reinit(*(simbox->spectral_frame->sparsity));
+          simbox->spectral_frame->constraints->distribute_local_to_global(
+              *cell_Mq_uivi, *spectral_l2g, *(system->Mq));
+          // accumulate to Mxq
+          system->Operator_Kronecker_accumulate(simbox);
+        } // spectral_qid
+      }   // spatial_qid
+      // ENERGY LOSS (ADVECTION) OPERATOR
       for (unsigned int spatial_qid = 0; spatial_qid < spatial_q_points;
            ++spatial_qid) {
         // prepare Mx
@@ -452,9 +625,9 @@ void System_tmp<spa_dim, spe_dim>::Operator::init(
                   spatial_fev->quadrature_point(spatial_qid),
                   spectral_fev->quadrature_point(spectral_qid))};
           const dealii::Tensor<2, spe_dim, double> geometric_coefficient{
-              this->T(spectral_fev->quadrature_point(spectral_qid))};
+              this->Tq(spectral_fev->quadrature_point(spectral_qid))};
           const dealii::Tensor<1, spe_dim, double> geometric_div_coefficient{
-              this->dT(spectral_fev->quadrature_point(spectral_qid))};
+              this->dTq(spectral_fev->quadrature_point(spectral_qid))};
           for (dealii::types::global_dof_index alpha = 0; alpha < spectral_dpc;
                ++alpha) {
             for (dealii::types::global_dof_index beta = 0; beta < spectral_dpc;
@@ -509,7 +682,7 @@ void System_tmp<spa_dim, spe_dim>::Operator::init(
                         spatial_fev->quadrature_point(spatial_qid),
                         spectral_fefv->quadrature_point(spectral_qid))};
                 const dealii::Tensor<2, spe_dim, double> geometric_coefficient{
-                    this->T(spectral_fefv->quadrature_point(spectral_qid))};
+                    this->Tq(spectral_fefv->quadrature_point(spectral_qid))};
                 for (dealii::types::global_dof_index alpha = 0;
                      alpha < spectral_dpc; ++alpha) {
                   for (dealii::types::global_dof_index beta = 0;
@@ -582,7 +755,7 @@ void System_tmp<spa_dim, spe_dim>::Operator::init(
               // cells at higher level take the task
               // or at same level but lower index
               // in 1 dimension a cell cannot "see" neighbor at higher
-              // refinement level and no face has children anymore
+              // refinement level and no face has children anx2more
               if (neighbor->level() < spectral_cell->level() or
                   (neighbor->level() == spectral_cell->level() and
                    neighbor->index() > spectral_cell->index())) {
@@ -641,7 +814,7 @@ void System_tmp<spa_dim, spe_dim>::Operator::assemble_spectral_face(
         system->advection->Aqq(fev->quadrature_point(spatial_qid),
                                fefv->quadrature_point(spectral_qid))};
     const dealii::Tensor<2, spe_dim, double> geometric_coefficient{
-        this->T(fefv->quadrature_point(spectral_qid))};
+        this->Tq(fefv->quadrature_point(spectral_qid))};
     const double flux =
         dealii::scalar_product(geometric_coefficient * advection_coefficient,
                                fefv->normal_vector(spectral_qid));
@@ -806,35 +979,12 @@ void System_tmp<spa_dim, spe_dim>::RHS::init(
 }
 
 //------------------------------------------------------------------------------
-// customized Propagator
-
+// customized propagator
 template <int spa_dim, int spe_dim>
 class Propagator_tmp final : public Propagator<spa_dim, spe_dim> {
 public:
-  Propagator_tmp() = default;
   Propagator_tmp(const Param *);
   virtual ~Propagator_tmp() = default;
-  void solve_single_step() override;
-  // spatial interpolation position
-  dealii::Point<spa_dim, double> spatial_ref;
-  // calculating L2 error w.r.t. analytical result
-  double spectral_L2err() const;
-  // analytical solution
-  class analytical_solution : public dealii::Function<spe_dim, double> {
-  public:
-    analytical_solution() = default;
-    analytical_solution(const Param *);
-    virtual ~analytical_solution() = default;
-    double value(const dealii::Point<spe_dim, double> &,
-                 const unsigned int component = 0) const override;
-
-  protected:
-    double alpha, beta, eta, nz, nx, ny, sz, sx, sy;
-    double L0, L1, L2, q0_min, q1_min, q2_min;
-  };
-  std::unique_ptr<
-      typename Propagator_tmp<spa_dim, spe_dim>::analytical_solution>
-      baseline;
 };
 
 template <int spa_dim, int spe_dim>
@@ -852,409 +1002,72 @@ Propagator_tmp<spa_dim, spe_dim>::Propagator_tmp(const Param *par) {
   this->spatial_refine_scheme = par->grid_set.spatial_refine_scheme;
   this->spectral_refine_scheme = par->grid_set.spectral_refine_scheme;
   this->simbox = std::make_unique<Simbox_tmp<spa_dim, spe_dim>>(par);
-  this->solution = std::make_unique<Solution<spa_dim, spe_dim>>(par);
-  this->system = std::make_unique<System_tmp<spa_dim, spe_dim>>(par);
-  this->baseline = std::make_unique<
-      typename Propagator_tmp<spa_dim, spe_dim>::analytical_solution>(par);
-  // setup spectral interpolation position
-  this->spatial_ref[0] = 0.5 * (par->grid_set.x1_max + par->grid_set.x1_min);
-  if (spa_dim > 1) {
-    this->spatial_ref[1] = 0.5 * (par->grid_set.x2_max + par->grid_set.x2_min);
-    if (spa_dim > 2) {
-      this->spatial_ref[2] =
-          0.5 * (par->grid_set.x3_max + par->grid_set.x3_min);
-    }
-  }
+  this->solution = std::make_unique<Solution_tmp<spa_dim, spe_dim>>(par);
+  this->system = std::make_unique<System_tmp<spa_dim, spe_dim>>();
 }
 
-template <int spa_dim, int spe_dim>
-void Propagator_tmp<spa_dim, spe_dim>::solve_single_step() {
-  // direct solver
-  auto solver_control = std::make_unique<dealii::SparseDirectUMFPACK>();
-  solver_control->initialize(*(this->system->Mxq));
-  solver_control->vmult(*(this->solution->Snew), *(this->system->Rxq));
-  // only need to redistribute constraints to solution
-  this->solution->post_constraints(this->simbox.get());
-  /*
-   // BiCGStab solver
-   auto solver_control = std::make_unique<dealii::SolverControl>
-   (this->iteration, this->tolerance * this->system->Rxq->l2_norm(), false,
-   false);
-   auto bicg = std::make_unique<dealii::SolverBicgstab<>> (*solver_control);
-   bicg->solve (*(this->system->Mxq),
-   *(this->solution->Snew),
-   *(this->system->Rxq),
-   dealii::PreconditionIdentity());
-   this->solution->post_constraints (this->simbox.get());
-   #if !defined(NDEBUG) || defined(VERBOSE)
-   std::cout<< "   " << solver_control->last_step()
-   << " BiCGStab iterations." << std::endl;
-   #endif
-   */
-}
-
-template <int spa_dim, int spe_dim>
-Propagator_tmp<spa_dim, spe_dim>::analytical_solution::analytical_solution(
-    const Param *par) {
-  this->alpha = -1.;
-  this->beta = -1.;
-  this->eta = -1.;
-  this->nz = -1.5;
-  this->nx = -1.5;
-  this->ny = -1.5;
-  this->sz = -2.2;
-  this->sx = -2.2;
-  this->sy = -2.2;
-  this->q0_min = par->grid_set.q1_min;
-  this->q1_min = par->grid_set.q2_min;
-  this->q2_min = par->grid_set.q3_min;
-  this->L0 = par->grid_set.q1_max - this->q0_min;
-  this->L1 = par->grid_set.q2_max - this->q1_min;
-  this->L2 = par->grid_set.q3_max - this->q2_min;
-}
-
-template <int spa_dim, int spe_dim>
-double Propagator_tmp<spa_dim, spe_dim>::analytical_solution::value(
-    const dealii::Point<spe_dim, double> &q, const unsigned int) const {
-  const double prefact0{std::exp(this->q0_min) /
-                        (this->alpha * (1 + this->sz))};
-  const double dz{q[0] - this->q0_min};
-  double tmp{prefact0 * (std::exp((1 + this->sz - this->nz) * dz) -
-                         std::exp((1 + this->sz) * this->L0 - this->nz * dz))};
-  if (spe_dim > 1) {
-    const double prefact1{std::exp(this->q1_min) /
-                          (this->beta * (1 + this->sx))};
-    const double prefact2{std::exp(this->q2_min) /
-                          (this->eta * (1 + this->sy))};
-    const double dx{q[1] - this->q1_min};
-    const double dy{q[2] - this->q2_min};
-    tmp *= prefact1 * (std::exp((1 + this->sx - this->nx) * dx) -
-                       std::exp((1 + this->sx) * this->L1 - this->nx * dx));
-    tmp *= prefact2 * (std::exp((1 + this->sy - this->ny) * dy) -
-                       std::exp((1 + this->sy) * this->L2 - this->ny * dy));
-  }
-  return tmp;
-}
-
-template <int spa_dim, int spe_dim>
-double Propagator_tmp<spa_dim, spe_dim>::spectral_L2err() const {
-  // interpolate at this->spectral_ref
-  const unsigned int spectral_dofs{
-      this->simbox->spectral_frame->dof_handler->n_dofs()};
-  const unsigned int spatial_dofs{
-      this->simbox->spatial_frame->dof_handler->n_dofs()};
-  auto spe_slice = std::make_unique<dealii::Vector<double>>(spectral_dofs);
-  auto tmp_spatial = std::make_unique<dealii::Vector<double>>(spatial_dofs);
-  auto field_spatial =
-      std::make_unique<dealii::Functions::FEFieldFunction<spa_dim>>(
-          *(this->simbox->spatial_frame->dof_handler), *tmp_spatial);
-  auto c_id = dealii::GridTools::find_active_cell_around_point(
-      *(this->simbox->spatial_frame->dof_handler), this->spatial_ref);
-  field_spatial->set_active_cell(c_id);
-  for (unsigned int j = 0; j < spectral_dofs; ++j) {
-    for (unsigned int i = 0; i < spatial_dofs; ++i)
-      (*tmp_spatial)[i] = this->solution->new_el(i, j);
-    (*spe_slice)[j] = field_spatial->value(this->spatial_ref);
-  }
-  // evaluate L2 err with spe_slice
-  auto cellwise_err = std::make_unique<dealii::Vector<double>>(
-      this->simbox->spectral_frame->triangulation->n_active_cells());
-  dealii::VectorTools::integrate_difference(
-      *(this->simbox->spectral_frame->dof_handler), *spe_slice,
-      *(this->baseline), *cellwise_err,
-      dealii::QIterated<spe_dim>(dealii::QTrapez<1>(),
-                                 this->simbox->spectral_frame->fe->degree + 2),
-      dealii::VectorTools::L2_norm);
-  return dealii::VectorTools::compute_global_error(
-      *(this->simbox->spectral_frame->triangulation), *cellwise_err,
-      dealii::VectorTools::L2_norm);
-}
-
-//------------------------------------------------------------------------------
-// routines
-
-// time-independent approach
-// spatial domain is set as 1D
-void static_11routine() {
-  // parameter holder
-  auto test_par = std::make_unique<Param>();
-  test_par->pip_set.iteration = 1000;
-  test_par->pip_set.tolerance = 1.e-12;
-  // spatial grid
-  test_par->pip_set.spatial_dim = 1;
-  test_par->pip_set.spatial_pol_order = 1;
-  test_par->grid_set.x1_max = 1.;
-  test_par->grid_set.x1_min = 0.;
-  test_par->grid_set.nx1 = 3;
-  // spectral grid
-  test_par->pip_set.spectral_dim = 1;
-  test_par->pip_set.spectral_pol_order = 1;
-  test_par->grid_set.q1_max = 1;
-  test_par->grid_set.q1_min = -1;
-  test_par->grid_set.q2_max = 1;
-  test_par->grid_set.q2_min = -1;
-  test_par->grid_set.q3_max = 1;
-  test_par->grid_set.q3_min = -1;
-  test_par->grid_set.nq1 = 3;
-  test_par->grid_set.nq2 = 3;
-  test_par->grid_set.nq3 = 3;
-  // grid refine limits
-  test_par->grid_set.spatial_min_refine_lv = 0;
-  test_par->grid_set.spectral_min_refine_lv = 0;
-  test_par->grid_set.do_spatial_refine = false;
-  test_par->grid_set.do_spectral_refine = true;
-  test_par->grid_set.refine_ratio = 0.5;
-  test_par->grid_set.coarsen_ratio = 0;
-
-  unsigned int lv;
-  // global refine
-  std::cout << "1D global refinement, pol 1" << std::endl;
-  test_par->grid_set.spectral_max_refine_lv = 4;
-  test_par->grid_set.spectral_refine_scheme = "global";
-  auto test_prop_rg = std::make_unique<Propagator_tmp<1, 1>>(test_par.get());
-  test_prop_rg->init();
-  lv = 0;
-  do {
-    test_prop_rg->solve_single_step();
-    std::cout << lv << "\t" << test_prop_rg->spectral_L2err() << std::endl;
-    // test_prop_rg->spectral_snapshot (dealii::Point<1,double>(0),
-    //"1d_tmp_rg_lv"+dealii::Utilities::int_to_string(lv,2));
-    test_prop_rg->refine();
-    lv++;
-  } while (lv <= test_par->grid_set.spectral_max_refine_lv);
-  // adaptive refine
-  std::cout << "1D adaptive refinement, pol. 1" << std::endl;
-  test_par->grid_set.spectral_max_refine_lv = 4;
-  test_par->grid_set.spectral_refine_scheme = "adaptive_gradient";
-  auto test_prop_ra = std::make_unique<Propagator_tmp<1, 1>>(test_par.get());
-  test_prop_ra->init();
-  lv = 0;
-  do {
-    test_prop_ra->solve_single_step();
-    std::cout << lv << "\t" << test_prop_ra->spectral_L2err() << std::endl;
-    // test_prop_ra->spectral_snapshot (dealii::Point<1,double>(0),
-    //"1d_tmp_ra_lv"+dealii::Utilities::int_to_string(lv,2));
-    test_prop_ra->refine();
-    lv++;
-  } while (lv <= test_par->grid_set.spectral_max_refine_lv);
-  // global refine, pol 2
-  std::cout << "1D global refinement, pol 2" << std::endl;
-  test_par->grid_set.spectral_max_refine_lv = 4;
-  test_par->pip_set.spectral_pol_order = 2;
-  test_par->grid_set.spectral_refine_scheme = "global";
-  auto test_prop_rg2 = std::make_unique<Propagator_tmp<1, 1>>(test_par.get());
-  test_prop_rg2->init();
-  lv = 0;
-  do {
-    test_prop_rg2->solve_single_step();
-    std::cout << lv << "\t" << test_prop_rg2->spectral_L2err() << std::endl;
-    // test_prop_rg2->spectral_snapshot (dealii::Point<1,double>(0),
-    //"1d_tmp_ra_lv"+dealii::Utilities::int_to_string(lv,2));
-    test_prop_rg2->refine();
-    lv++;
-  } while (lv <= test_par->grid_set.spectral_max_refine_lv);
-}
-
-// time-independent approach
-// spatial domain is set as 3D
-void static_13routine() {
-  // parameter holder
-  auto test_par = std::make_unique<Param>();
-  test_par->pip_set.iteration = 1000;
-  test_par->pip_set.tolerance = 1.e-12;
-  // spatial grid
-  test_par->pip_set.spatial_dim = 1;
-  test_par->pip_set.spatial_pol_order = 1;
-  test_par->grid_set.x1_max = 1.;
-  test_par->grid_set.x1_min = 0.;
-  test_par->grid_set.nx1 = 3;
-  // spectral grid
-  test_par->pip_set.spectral_dim = 3;
-  test_par->pip_set.spectral_pol_order = 1;
-  test_par->grid_set.q1_max = 1;
-  test_par->grid_set.q1_min = -1;
-  test_par->grid_set.q2_max = 1;
-  test_par->grid_set.q2_min = -1;
-  test_par->grid_set.q3_max = 1;
-  test_par->grid_set.q3_min = -1;
-  test_par->grid_set.nq1 = 3;
-  test_par->grid_set.nq2 = 3;
-  test_par->grid_set.nq3 = 3;
-  // grid refine limits
-  test_par->grid_set.spatial_min_refine_lv = 0;
-  test_par->grid_set.spectral_min_refine_lv = 0;
-  test_par->grid_set.do_spatial_refine = false;
-  test_par->grid_set.do_spectral_refine = true;
-  test_par->grid_set.refine_ratio = 0.5;
-  test_par->grid_set.coarsen_ratio = 0;
-
-  unsigned int lv;
-  // global refine
-  std::cout << "3D global refinement, pol 1" << std::endl;
-  test_par->grid_set.spectral_max_refine_lv = 4;
-  test_par->grid_set.spectral_refine_scheme = "global";
-  auto test_prop_rg = std::make_unique<Propagator_tmp<1, 3>>(test_par.get());
-  test_prop_rg->init();
-  lv = 0;
-  do {
-    test_prop_rg->solve_single_step();
-    std::cout << lv << "\t" << test_prop_rg->spectral_L2err() << std::endl;
-    // test_prop_rg->spectral_snapshot (dealii::Point<1,double>(0),
-    //"3d_tmp_rg_lv"+dealii::Utilities::int_to_string(lv,2));
-    test_prop_rg->refine();
-    lv++;
-  } while (lv <= test_par->grid_set.spectral_max_refine_lv);
-  // adaptive refine
-  std::cout << "3D adaptive refinement, pol. 1" << std::endl;
-  test_par->grid_set.spectral_max_refine_lv = 4;
-  test_par->grid_set.spectral_refine_scheme = "adaptive_gradient";
-  auto test_prop_ra = std::make_unique<Propagator_tmp<1, 3>>(test_par.get());
-  test_prop_ra->init();
-  lv = 0;
-  do {
-    test_prop_ra->solve_single_step();
-    std::cout << lv << "\t" << test_prop_ra->spectral_L2err() << std::endl;
-    // test_prop_ra->spectral_snapshot (dealii::Point<1,double>(0),
-    //"3d_tmp_ra_lv"+dealii::Utilities::int_to_string(lv,2));
-    test_prop_ra->refine();
-    lv++;
-  } while (lv <= test_par->grid_set.spectral_max_refine_lv);
-  // global refine, pol 2
-  std::cout << "3D global refinement, pol 2" << std::endl;
-  test_par->grid_set.spectral_max_refine_lv = 4;
-  test_par->pip_set.spectral_pol_order = 2;
-  test_par->grid_set.spectral_refine_scheme = "global";
-  auto test_prop_rg2 = std::make_unique<Propagator_tmp<1, 3>>(test_par.get());
-  test_prop_rg2->init();
-  lv = 0;
-  do {
-    test_prop_rg2->solve_single_step();
-    std::cout << lv << "\t" << test_prop_rg2->spectral_L2err() << std::endl;
-    // test_prop_rg2->spectral_snapshot (dealii::Point<1,double>(0),
-    //"3d_tmp_ra_lv"+dealii::Utilities::int_to_string(lv,2));
-    test_prop_rg2->refine();
-    lv++;
-  } while (lv <= test_par->grid_set.spectral_max_refine_lv);
-}
-
-// time-dependent approach with
-// fixed time-step difference
-void evolve_11routine() {
-  // parameter holder
-  auto test_par = std::make_unique<Param>();
-  test_par->pip_set.iteration = 1000;
-  test_par->pip_set.tolerance = 1.e-12;
-  // spatial grid
-  test_par->pip_set.spatial_dim = 1;
-  test_par->pip_set.spatial_pol_order = 1;
-  test_par->grid_set.x1_max = 1.;
-  test_par->grid_set.x1_min = 0.;
-  test_par->grid_set.nx1 = 3;
-  // spectral grid
-  test_par->pip_set.spectral_dim = 1;
-  test_par->pip_set.spectral_pol_order = 1;
-  test_par->grid_set.q1_max = 1;
-  test_par->grid_set.q1_min = -1;
-  test_par->grid_set.q2_max = 1;
-  test_par->grid_set.q2_min = -1;
-  test_par->grid_set.q3_max = 1;
-  test_par->grid_set.q3_min = -1;
-  test_par->grid_set.nq1 = 3;
-  test_par->grid_set.nq2 = 3;
-  test_par->grid_set.nq3 = 3;
-  // grid refine limits
-  test_par->grid_set.spatial_min_refine_lv = 0;
-  test_par->grid_set.spectral_min_refine_lv = 0;
-  test_par->grid_set.do_spatial_refine = false;
-  test_par->grid_set.do_spectral_refine = true;
-  test_par->grid_set.refine_ratio = 0.5;
-  test_par->grid_set.coarsen_ratio = 0;
-  // time-dependent
-  test_par->pip_set.time_dependency = true;
-  test_par->pip_set.solver_scheme = 0.5;
-  test_par->pip_set.physical_timediff = 0.02;
-  // global refine
-  std::cout << "1D global refinement, pol 1" << std::endl;
-  test_par->grid_set.spectral_refine_scheme = "global";
-  for (int lv = 0; lv <= 4; ++lv) {
-    test_par->grid_set.spectral_min_refine_lv = lv;
-    std::cout << "refine lv. " << lv << std::endl;
-    for (int i = 10; i < 2100; i += 50) {
-      test_par->pip_set.step_lim = i;
-      test_par->pip_set.refine_cd = test_par->pip_set.step_lim + 1;
-      auto test_prop_rg =
-          std::make_unique<Propagator_tmp<1, 1>>(test_par.get());
-      test_prop_rg->run();
-      std::cout << i << "\t" << test_prop_rg->spectral_L2err() << std::endl;
-    }
-  }
-}
-
-// time-dependent approach with
-// fixed total evolving time
-void convergence_11routine() {
-  // parameter holder
-  auto test_par = std::make_unique<Param>();
-  test_par->pip_set.iteration = 1000;
-  test_par->pip_set.tolerance = 1.e-12;
-  // spatial grid
-  test_par->pip_set.spatial_dim = 1;
-  test_par->pip_set.spatial_pol_order = 1;
-  test_par->grid_set.x1_max = 1.;
-  test_par->grid_set.x1_min = 0.;
-  test_par->grid_set.nx1 = 3;
-  // spectral grid
-  test_par->pip_set.spectral_dim = 1;
-  test_par->pip_set.spectral_pol_order = 1;
-  test_par->grid_set.q1_max = 1;
-  test_par->grid_set.q1_min = -1;
-  test_par->grid_set.q2_max = 1;
-  test_par->grid_set.q2_min = -1;
-  test_par->grid_set.q3_max = 1;
-  test_par->grid_set.q3_min = -1;
-  test_par->grid_set.nq1 = 3;
-  test_par->grid_set.nq2 = 3;
-  test_par->grid_set.nq3 = 3;
-  // grid refine limits
-  test_par->grid_set.spatial_min_refine_lv = 0;
-  test_par->grid_set.spectral_min_refine_lv = 0;
-  test_par->grid_set.do_spatial_refine = false;
-  test_par->grid_set.do_spectral_refine = true;
-  test_par->grid_set.refine_ratio = 0.5;
-  test_par->grid_set.coarsen_ratio = 0;
-  // time-dependent
-  test_par->pip_set.time_dependency = true;
-  test_par->pip_set.solver_scheme = 0.5;
-  // global refine
-  std::cout << "1D global refinement, pol 1" << std::endl;
-  test_par->grid_set.spectral_refine_scheme = "global";
-
-  for (int lv = 0; lv <= 4; ++lv) {
-    test_par->grid_set.spectral_min_refine_lv = lv;
-    std::cout << "refine lv. " << lv << std::endl;
-    for (int i = 5; i < 200; i += 3) {
-      test_par->pip_set.step_lim = i;
-      test_par->pip_set.physical_timediff = 200. / i;
-      test_par->pip_set.refine_cd = test_par->pip_set.step_lim + 1;
-      auto test_prop_rg =
-          std::make_unique<Propagator_tmp<1, 1>>(test_par.get());
-      test_prop_rg->run();
-      std::cout << i << "\t" << test_prop_rg->spectral_L2err() << std::endl;
-    }
-  }
-}
-
-//------------------------------------------------------------------------------
-// main
-
+// main (testing) routines
 int main() {
-  // time-independent routines
-  static_11routine();
-  // static_13routine();
-  // time-dependent routine with fixed steps
-  evolve_11routine();
-  // time-dependent routine with fixed evolving time
-  convergence_11routine();
+  auto test_par = std::make_unique<Param>();
+  // solver precision
+  test_par->pip_set.iteration = 1000;
+  test_par->pip_set.tolerance = 1.e-12;
+  // spatial domain
+  test_par->pip_set.spatial_dim = 1;
+  test_par->pip_set.spatial_pol_order = 1;
+  test_par->grid_set.x1_max = 30.;
+  test_par->grid_set.x1_min = 0.;
+  test_par->grid_set.nx1 = 100;
+  // spectral domain
+  test_par->pip_set.spectral_dim = 1;
+  test_par->pip_set.spectral_pol_order = 1;
+  test_par->grid_set.q1_max = 7;
+  test_par->grid_set.q1_min = -5;
+  test_par->grid_set.nq1 = 600;
+  // grid refine limits
+  test_par->grid_set.do_spatial_refine = false;
+  test_par->grid_set.do_spectral_refine = false;
+  test_par->grid_set.spatial_refine_scheme = "adaptive_kelly";
+  test_par->grid_set.spectral_refine_scheme = "adaptive_kelly";
+  test_par->grid_set.spectral_min_refine_lv = 0;
+  test_par->grid_set.spatial_min_refine_lv = 0;
+  test_par->grid_set.spatial_max_refine_lv = 0;
+  test_par->grid_set.spectral_max_refine_lv = 0;
+  test_par->grid_set.refine_ratio = 0.5;
+  test_par->grid_set.coarsen_ratio = 0;
+  // time-dependency
+  test_par->pip_set.time_dependency = false;
+  // for time-independent solving, set step_lim as 0
+  // otherwise the single step solver will repeat
+  test_par->pip_set.step_lim = 0;
+  test_par->pip_set.refine_cd = test_par->pip_set.step_lim + 1;
+  test_par->pip_set.solver_scheme = 0.5;
+  test_par->pip_set.evo_lim = 1.e-3;
+  test_par->pip_set.physical_timediff = 1.e-2;
+
+  auto test_prop = std::make_unique<Propagator_tmp<1, 1>>(test_par.get());
+  test_prop->run();
+
+  // get density
+  // test_prop->density_snapshot ("example_cre_simple");
+  // get spectral snapshot
+  test_prop->spectral_snapshot(dealii::Point<1, double>(0),
+                               "example_cre_simple_snr_q0");
+  test_prop->spectral_snapshot(dealii::Point<1, double>(2),
+                               "example_cre_simple_snr_q2");
+  test_prop->spectral_snapshot(dealii::Point<1, double>(4),
+                               "example_cre_simple_snr_q4");
+  test_prop->spectral_snapshot(dealii::Point<1, double>(8),
+                               "example_cre_simple_snr_q8");
+  // get spatial snapshot
+  test_prop->spatial_snapshot(dealii::Point<1, double>(-2),
+                              "example_cre_simple_snr_xm2");
+  test_prop->spatial_snapshot(dealii::Point<1, double>(0),
+                              "example_cre_simple_snr_x0");
+  test_prop->spatial_snapshot(dealii::Point<1, double>(2),
+                              "example_cre_simple_snr_x2");
+  test_prop->spatial_snapshot(dealii::Point<1, double>(4),
+                              "example_cre_simple_snr_x4");
 }
 
 // END
