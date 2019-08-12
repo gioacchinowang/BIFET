@@ -15,9 +15,9 @@ template class Source<2, 3>;
 template class Source<3, 3>;
 
 template <int spa_dim, int spe_dim>
-double
-Source<spa_dim, spe_dim>::value(const dealii::Point<spa_dim, double> &,
-                                const dealii::Point<spe_dim, double> &) const {
+double Source<spa_dim, spe_dim>::value(const dealii::Point<spa_dim, double> &,
+                                       const dealii::Point<spe_dim, double> &,
+                                       const double &) const {
   return 0.;
 }
 

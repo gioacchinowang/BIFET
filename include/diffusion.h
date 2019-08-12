@@ -20,17 +20,21 @@ public:
   // spatial diffusion
   // 1st argument: spatial position
   // 2nd argument: spectral position
+  // 3rd argument: evolution step time for time-dependent problems
   // return: null tensor
   virtual dealii::Tensor<2, spa_dim, double>
   Dxx(const dealii::Point<spa_dim, double> &,
-      const dealii::Point<spe_dim, double> &) const;
+      const dealii::Point<spe_dim, double> &,
+      const double &step_time = 0) const;
   // spectral diffusion
   // 1st argument: spatial position
   // 2nd argument: spectral position
+  // 3rd argument: evolution step time for time-dependent problems
   // return: null tensor
   virtual dealii::Tensor<2, spe_dim, double>
   Dqq(const dealii::Point<spa_dim, double> &,
-      const dealii::Point<spe_dim, double> &) const;
+      const dealii::Point<spe_dim, double> &,
+      const double &step_time = 0) const;
 };
 
 #endif

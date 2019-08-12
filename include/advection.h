@@ -20,17 +20,21 @@ public:
   // spatial advection
   // 1st argument: spatial position
   // 2nd argument: spectral position
+  // 3rd argument: evolution step time for time-dependent problems
   // return: null tensor
   virtual dealii::Tensor<1, spa_dim, double>
   Axx(const dealii::Point<spa_dim, double> &,
-      const dealii::Point<spe_dim, double> &) const;
+      const dealii::Point<spe_dim, double> &,
+      const double &step_time = 0) const;
   // spectral advection
   // 1st argument: spatial position
   // 2nd argument: spectral position
+  // 3rd argument: evolution step time for time-dependent problems
   // return: null tensor
   virtual dealii::Tensor<1, spe_dim, double>
   Aqq(const dealii::Point<spa_dim, double> &,
-      const dealii::Point<spe_dim, double> &) const;
+      const dealii::Point<spe_dim, double> &,
+      const double &step_time = 0) const;
 };
 
 #endif

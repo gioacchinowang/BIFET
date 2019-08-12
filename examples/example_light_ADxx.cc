@@ -60,7 +60,8 @@ public:
   virtual Diffusion_tmp *clone() const { return new Diffusion_tmp(*this); }
   dealii::Tensor<2, spa_dim, double>
   Dxx(const dealii::Point<spa_dim, double> &,
-      const dealii::Point<spe_dim, double> &) const override;
+      const dealii::Point<spe_dim, double> &,
+      const double &step_time = 0) const override;
 
   double alpha, beta;
 };
@@ -73,9 +74,10 @@ Diffusion_tmp<spa_dim, spe_dim>::Diffusion_tmp(const Param *) {
 
 // customized spatial diffusion tensor modelling
 template <int spa_dim, int spe_dim>
-dealii::Tensor<2, spa_dim, double> Diffusion_tmp<spa_dim, spe_dim>::Dxx(
-    const dealii::Point<spa_dim, double> &,
-    const dealii::Point<spe_dim, double> &) const {
+dealii::Tensor<2, spa_dim, double>
+Diffusion_tmp<spa_dim, spe_dim>::Dxx(const dealii::Point<spa_dim, double> &,
+                                     const dealii::Point<spe_dim, double> &,
+                                     const double &) const {
   dealii::Tensor<2, spa_dim, double> tmp;
   tmp = 0;
   // D[0,0]
@@ -107,7 +109,8 @@ public:
   virtual Advection_tmp *clone() const { return new Advection_tmp(*this); }
   dealii::Tensor<1, spa_dim, double>
   Axx(const dealii::Point<spa_dim, double> &,
-      const dealii::Point<spe_dim, double> &) const override;
+      const dealii::Point<spe_dim, double> &,
+      const double &step_time = 0) const override;
 
   double az, ax, ay;
 };
@@ -121,9 +124,10 @@ Advection_tmp<spa_dim, spe_dim>::Advection_tmp(const Param *) {
 
 // spatial advection tensor modelling
 template <int spa_dim, int spe_dim>
-dealii::Tensor<1, spa_dim, double> Advection_tmp<spa_dim, spe_dim>::Axx(
-    const dealii::Point<spa_dim, double> &,
-    const dealii::Point<spe_dim, double> &) const {
+dealii::Tensor<1, spa_dim, double>
+Advection_tmp<spa_dim, spe_dim>::Axx(const dealii::Point<spa_dim, double> &,
+                                     const dealii::Point<spe_dim, double> &,
+                                     const double &) const {
   dealii::Tensor<1, spa_dim, double> tmp;
   tmp = 0;
   // G[0]
@@ -162,7 +166,8 @@ public:
   }
   virtual Source_tmp *clone() const { return new Source_tmp(*this); }
   double value(const dealii::Point<spa_dim, double> &,
-               const dealii::Point<spe_dim, double> &) const override;
+               const dealii::Point<spe_dim, double> &,
+               const double &step_time = 0) const override;
 
   double alpha, beta, az, ax, ay;
   double L0, L1, L2, x0_min, x1_min, x2_min;
@@ -185,9 +190,10 @@ Source_tmp<spa_dim, spe_dim>::Source_tmp(const Param *par) {
 
 // customized source modelling
 template <int spa_dim, int spe_dim>
-double Source_tmp<spa_dim, spe_dim>::value(
-    const dealii::Point<spa_dim, double> &x,
-    const dealii::Point<spe_dim, double> &) const {
+double
+Source_tmp<spa_dim, spe_dim>::value(const dealii::Point<spa_dim, double> &x,
+                                    const dealii::Point<spe_dim, double> &,
+                                    const double &) const {
   const double prefact0{
       (std::exp(-this->L0) / (this->alpha + this->az) - 1. / this->az) *
       std::exp(-this->az * this->L0 / this->alpha)};
@@ -363,7 +369,7 @@ System_tmp<spa_dim, spe_dim>::System_tmp(const Param *par) {
 template <int spa_dim, int spe_dim>
 void System_tmp<spa_dim, spe_dim>::Operator::init(
     System<spa_dim, spe_dim> *system, const Simbox<spa_dim, spe_dim> *simbox,
-    const double &) {
+    const double &step_time) {
   // auxiliary objects needed for conduct discretized integration
   auto spatial_quadrature_formula = std::make_unique<dealii::QGauss<spa_dim>>(
       simbox->spatial_frame->fe->degree + 1);
@@ -446,11 +452,11 @@ void System_tmp<spa_dim, spe_dim>::Operator::init(
           const dealii::Tensor<2, spa_dim, double> diffusion_coefficient{
               system->diffusion->Dxx(
                   spatial_fev->quadrature_point(spatial_qid),
-                  spectral_fev->quadrature_point(spectral_qid))};
+                  spectral_fev->quadrature_point(spectral_qid), step_time)};
           const dealii::Tensor<1, spa_dim, double> advection_coefficient{
               system->advection->Axx(
                   spatial_fev->quadrature_point(spatial_qid),
-                  spectral_fev->quadrature_point(spectral_qid))};
+                  spectral_fev->quadrature_point(spectral_qid), step_time)};
           // prepare Mx
           for (dealii::types::global_dof_index i = 0; i < spatial_dpc; ++i) {
             for (dealii::types::global_dof_index j = 0; j < spatial_dpc; ++j) {
@@ -483,7 +489,7 @@ void System_tmp<spa_dim, spe_dim>::Operator::init(
 template <int spa_dim, int spe_dim>
 void System_tmp<spa_dim, spe_dim>::RHS::init(
     System<spa_dim, spe_dim> *system, const Simbox<spa_dim, spe_dim> *simbox,
-    const double &) {
+    const double &step_time) {
   // auxiliary objects needed for conduct discretized integration
   auto spatial_quadrature_formula = std::make_unique<dealii::QGauss<spa_dim>>(
       simbox->spatial_frame->fe->degree + 1);
@@ -562,7 +568,7 @@ void System_tmp<spa_dim, spe_dim>::RHS::init(
              ++spatial_qid) {
           const double coefficient{system->source->value(
               spatial_fev->quadrature_point(spatial_qid),
-              spectral_fev->quadrature_point(spectral_qid))};
+              spectral_fev->quadrature_point(spectral_qid), step_time)};
           // prepare spatial cell rhs
           for (dealii::types::global_dof_index i = 0; i < spatial_dpc; ++i) {
             (*spatial_cell_rhs)[i] = coefficient *

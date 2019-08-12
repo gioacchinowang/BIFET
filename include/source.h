@@ -23,9 +23,11 @@ public:
   // return scalar source distribution
   // 1st argument: spatial position
   // 2nd argument: spectral position
+  // 3rd argument: evolution step time for time-dependent problems
   // return: null source
   virtual double value(const dealii::Point<spa_dim, double> &,
-                       const dealii::Point<spe_dim, double> &) const;
+                       const dealii::Point<spe_dim, double> &,
+                       const double &step_time = 0) const;
 };
 
 #endif

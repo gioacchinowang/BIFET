@@ -1,28 +1,28 @@
-// Simbox class is designed to wrap up two frames (spatial and spectral)
+// Simbox class is designed to wrap up two frames (spatial and spectral).
 // DSP (dynamic sparsity pattern) in frames will be collected and assembled into
-// SP (sparsity pattern) of the simbox
+// the SP (sparsity pattern) of the simbox.
 //
-// Simbox class is (theoretically) independent of Galerkin methods
-// constraints of two domains are not assembled into one constraint
-// since assembling may not be as trivial as Kronecker product (for sparsities)
-// the way we handle constraints is as following:
-// 0. build simbox SP with constrained dof removed (carried out in
-// "assemble_sparsity" function)
-// 1. assemble per-quadrature-point system matrix and RHS
-// 2. copy local to temporary global cachers with per-domain constraints
-// 3. conduct Kronecker product for temporary cachers
-// 4. accumulating post product cachers into final results
+// Simbox class is (theoretically) independent of discretization methods,
+// while constraints of two domains are not assembled into one constraint
+// since assembling may not be as trivial as Kronecker product (for sparsities).
+// The way we handle constraints is as following:
+//  - Build simbox SP with constrained dofs removed (carried out in
+//    "assemble_sparsity" function).
+//  - Assemble quadrature-point-wise system matrix and RHS.
+//  - Copy local to temporary global caches with domain-wise constraints.
+//  - Conduct Kronecker product for temporary caches.
+//  - Accumulating post product caches into final results
 //
 // notice:
-// according to the design of (dynamic) sparsity pattern in deal.II lib
+//
+// According to the design of (dynamic) sparsity pattern in deal.II library,
 // only dynamic sparsity is available for carrying out Kronecker product across
 // domains DSP is accessable internally, while SP is public two frames are built
-// (or wrapped) directly in constructing Simbox object
+// (or wrapped) directly in constructing Simbox object.
 //
-// by default, base Simbox class is fully in cG (two Frame object)
-// as DGFrame is derived from Frame
-// theoretically base Simbox can represents any cG-dG combinations in two
-// domains
+// By default, the base Simbox class is fully in cG (two Frame object),
+// since DGFrame is derived from Frame, technically, the base Simbox class can
+// handle any cG-dG combinations in two domains.
 
 #ifndef BIFET_SIMBOX_H
 #define BIFET_SIMBOX_H

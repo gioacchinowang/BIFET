@@ -1,39 +1,27 @@
-// cG/dGFrame class handles following quantities in a SINGLE DOMAIN:
-// - simulation frame size and grid/mesh resolution
-// - triangulation in spatial and spectral spaces
-// - finite element quadrature methods, i.e., FE_Q (continuous Galerkin) or
-// FE_DGQ (discontinuous Galerkin)
-// - degree-of-freedom handler according to 1. and 2.
-// - strong boundaries (nature boundaries should be handled manually in weak
-// formulation assembling)
-// - constraints according to (in)homogeneous strong boundary (and in continuous
-// Galerkin, hanging nodes)
-// - dynamic sparsity pattern according to dofs
-// - refinement of above quantities (with various methods)
+// (dG)Frame class hosts following quantities in a SINGLE DOMAIN:
+//
+//  - Simulation frame size and grid/mesh resolution.
+//  - Triangulation in spatial and spectral spaces.
+//  - Finite element quadrature methods, e.g., FE_Q (continuous Galerkin) or
+//    FE_DGQ (discontinuous Galerkin).
+//  - Degree of freedom handler according to triangulation and quadrature
+//    method.
+//  - Strong boundaries (nature boundaries should be handled manually in weak
+//    formulation assembling).
+//  - Constraints according to (in)homogeneous strong boundary (and in
+//    continuous Galerkin, hanging nodes).
+//  - Dynamic sparsity pattern (DSP) according to dofs.
+//  - Refinement of above quantities.
 //
 // special notice:
-// spectral space has dimension either 1 or 3
-// spectral space in dimension 1, means isotropic spherical frame
-// spectral space in diemsnion 3, means right-hand-side Cartesian frame
 //
-// spatial space has dimension 1, 2 or 3, always uses right-hand-side Cartesian
-// frame 1D spatial frame has z coordinate 2D spatial frame has x-z coordinates
-// 3D spatial frame has z-x-y coordinates
+//  - only dynamic sparsity is addressed in Frame class, full sparsity will be
+//    handled in Simbox class
 //
-// only dynamic sparsity is addressed in Frame class, full sparsity will be
-// handled in Simbox class
-//
-// cG/dGFrame class is designed to be hidden behind Simbox class
-// "init" function is designed as protected, and invoked internally in
-// constructor of derived classes "refine" function is public, which is invoked
-// in Simbox->refine
-//
-// the base class (DG)Frame should not operate since the parameters are not
-// initialized DGFrame is considered as a base class, although technically
-// speaking it is derived from Frame it provides basic discontinuous Galerkin
-// initialization and refienment methods by default in Frame, homogeneous null
-// strong boundary condition applies to all boundary surfaces by default in
-// DGFrame, no strong boundary condition should be applied
+//  - cG/dGFrame class is designed to be hidden behind the Simbox class,
+//    "init" function is designed as protected, and invoked internally in
+//    constructor of derived classes "refine" function is public, which is
+//    used in Simbox->refine
 
 #ifndef BIFET_FRAME_H
 #define BIFET_FRAME_H

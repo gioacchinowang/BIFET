@@ -26,9 +26,11 @@ public:
   // growth rate
   // 1st argument: spatial position
   // 2nd argument: spectral position
+  // 3rd argument: evolution step time for time-dependent problems
   // return: null scalar growth rate
   virtual double rate(const dealii::Point<spa_dim, double> &,
-                      const dealii::Point<spe_dim, double> &) const;
+                      const dealii::Point<spe_dim, double> &,
+                      const double &step_time = 0) const;
 };
 
 #endif

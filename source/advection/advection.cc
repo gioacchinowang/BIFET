@@ -16,14 +16,16 @@ template class Advection<3, 3>;
 template <int spa_dim, int spe_dim>
 dealii::Tensor<1, spa_dim, double>
 Advection<spa_dim, spe_dim>::Axx(const dealii::Point<spa_dim, double> &,
-                                 const dealii::Point<spe_dim, double> &) const {
+                                 const dealii::Point<spe_dim, double> &,
+                                 const double &) const {
   return dealii::Tensor<1, spa_dim, double>();
 }
 
 template <int spa_dim, int spe_dim>
 dealii::Tensor<1, spe_dim, double>
 Advection<spa_dim, spe_dim>::Aqq(const dealii::Point<spa_dim, double> &,
-                                 const dealii::Point<spe_dim, double> &) const {
+                                 const dealii::Point<spe_dim, double> &,
+                                 const double &) const {
   return dealii::Tensor<1, spe_dim, double>();
 }
 

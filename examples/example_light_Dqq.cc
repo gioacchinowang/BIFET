@@ -58,7 +58,8 @@ public:
   virtual Diffusion_tmp *clone() const { return new Diffusion_tmp(*this); }
   dealii::Tensor<2, spe_dim, double>
   Dqq(const dealii::Point<spa_dim, double> &,
-      const dealii::Point<spe_dim, double> &) const override;
+      const dealii::Point<spe_dim, double> &,
+      const double &step_time = 0) const override;
 
   double alpha, beta;
 };
@@ -71,9 +72,10 @@ Diffusion_tmp<spa_dim, spe_dim>::Diffusion_tmp(const Param *) {
 
 // customized diffusion tensor model
 template <int spa_dim, int spe_dim>
-dealii::Tensor<2, spe_dim, double> Diffusion_tmp<spa_dim, spe_dim>::Dqq(
-    const dealii::Point<spa_dim, double> &,
-    const dealii::Point<spe_dim, double> &q) const {
+dealii::Tensor<2, spe_dim, double>
+Diffusion_tmp<spa_dim, spe_dim>::Dqq(const dealii::Point<spa_dim, double> &,
+                                     const dealii::Point<spe_dim, double> &q,
+                                     const double &) const {
   dealii::Tensor<2, spe_dim, double> tmp;
   tmp = 0;
   // D[0,0]
@@ -111,7 +113,8 @@ public:
   }
   virtual Source_tmp *clone() const { return new Source_tmp(*this); }
   double value(const dealii::Point<spa_dim, double> &,
-               const dealii::Point<spe_dim, double> &) const override;
+               const dealii::Point<spe_dim, double> &,
+               const double &step_time = 0) const override;
 
   double alpha, beta;
   double L0, L1, L2, q0_min, q1_min, q2_min;
@@ -131,9 +134,10 @@ Source_tmp<spa_dim, spe_dim>::Source_tmp(const Param *par) {
 
 // customized source model
 template <int spa_dim, int spe_dim>
-double Source_tmp<spa_dim, spe_dim>::value(
-    const dealii::Point<spa_dim, double> &,
-    const dealii::Point<spe_dim, double> &q) const {
+double
+Source_tmp<spa_dim, spe_dim>::value(const dealii::Point<spa_dim, double> &,
+                                    const dealii::Point<spe_dim, double> &q,
+                                    const double &) const {
   const double S0{std::sin(CGS_U_pi * (q[0] - this->q0_min) / this->L0)};
   const double C0{std::cos(CGS_U_pi * (q[0] - this->q0_min) / this->L0)};
   double tmp{CGS_U_pi * CGS_U_pi * this->alpha * S0 * q[0] * q[0] /
@@ -240,7 +244,7 @@ System_tmp<spa_dim, spe_dim>::System_tmp(const Param *par) {
 template <int spa_dim, int spe_dim>
 void System_tmp<spa_dim, spe_dim>::Operator::init(
     System<spa_dim, spe_dim> *system, const Simbox<spa_dim, spe_dim> *simbox,
-    const double &) {
+    const double &step_time) {
   // auxiliary objects needed for conduct discretized integration
   auto spatial_quadrature_formula = std::make_unique<dealii::QGauss<spa_dim>>(
       simbox->spatial_frame->fe->degree + 1);
@@ -321,7 +325,7 @@ void System_tmp<spa_dim, spe_dim>::Operator::init(
           const dealii::Tensor<2, spe_dim, double> coefficient{
               system->diffusion->Dqq(
                   spatial_fev->quadrature_point(spatial_qid),
-                  spectral_fev->quadrature_point(spectral_qid))};
+                  spectral_fev->quadrature_point(spectral_qid), step_time)};
           // prepare Mq
           for (dealii::types::global_dof_index alpha = 0; alpha < spectral_dpc;
                ++alpha) {
@@ -352,7 +356,7 @@ void System_tmp<spa_dim, spe_dim>::Operator::init(
 template <int spa_dim, int spe_dim>
 void System_tmp<spa_dim, spe_dim>::RHS::init(
     System<spa_dim, spe_dim> *system, const Simbox<spa_dim, spe_dim> *simbox,
-    const double &) {
+    const double &step_time) {
   // auxiliary objects needed for conduct discretized integration
   auto spatial_quadrature_formula = std::make_unique<dealii::QGauss<spa_dim>>(
       simbox->spatial_frame->fe->degree + 1);
@@ -429,7 +433,7 @@ void System_tmp<spa_dim, spe_dim>::RHS::init(
              ++spectral_qid) {
           const double coefficient{system->source->value(
               spatial_fev->quadrature_point(spatial_qid),
-              spectral_fev->quadrature_point(spectral_qid))};
+              spectral_fev->quadrature_point(spectral_qid), step_time)};
           // prepare spectral cell rhs
           for (dealii::types::global_dof_index alpha = 0; alpha < spectral_dpc;
                ++alpha) {

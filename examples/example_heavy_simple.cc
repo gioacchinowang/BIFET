@@ -44,7 +44,7 @@
 #include <system.h>
 
 //------------------------------------------------------------------------------
-//customized diffusion
+// customized diffusion
 
 template <int spa_dim, int spe_dim>
 class Diffusion_tmp final : public Diffusion<spa_dim, spe_dim> {
@@ -75,7 +75,7 @@ dealii::Tensor<2, spa_dim, double> Diffusion_tmp<spa_dim, spe_dim>::Dxx(
 }
 
 //------------------------------------------------------------------------------
-//customized advection
+// customized advection
 
 template <int spa_dim, int spe_dim>
 class Advection_tmp final : public Advection<spa_dim, spe_dim> {
@@ -171,7 +171,7 @@ dealii::Tensor<1, spe_dim, double> Advection_tmp<spa_dim, spe_dim>::brem_loss(
 }
 
 //------------------------------------------------------------------------------
-//customized source
+// customized source
 
 template <int spa_dim, int spe_dim>
 class Source_tmp final : public Source<spa_dim, spe_dim> {
@@ -204,7 +204,7 @@ double Source_tmp<spa_dim, spe_dim>::value(
 }
 
 //------------------------------------------------------------------------------
-//customized frame
+// customized frame
 
 template <int dim> class Frame__tmp final : public Frame<dim> {
 public:
@@ -258,7 +258,7 @@ template <int dim> void Frame__tmp<dim>::bfmap_init() {
 }
 
 //------------------------------------------------------------------------------
-//customised solution
+// customised solution
 
 template <int spa_dim, int spe_dim>
 class Solution_tmp final : public Solution<spa_dim, spe_dim> {
@@ -322,7 +322,7 @@ double Solution_tmp<spa_dim, spe_dim>::Spectral_initial::value(
 }
 
 //------------------------------------------------------------------------------
-//customized simbox
+// customized simbox
 
 template <int spa_dim, int spe_dim>
 class Simbox_tmp final : public Simbox<spa_dim, spe_dim> {
@@ -341,7 +341,7 @@ Simbox_tmp<spa_dim, spe_dim>::Simbox_tmp(const Param *par) {
 }
 
 //------------------------------------------------------------------------------
-//customized system
+// customized system
 
 template <int spa_dim, int spe_dim>
 class System_tmp final : public System<spa_dim, spe_dim> {
